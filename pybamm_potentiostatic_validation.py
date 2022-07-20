@@ -6,9 +6,6 @@ import pandas as pd
 
 model = pybamm.BaseModel()
 
-# load andres data
-andres_data = pd.read_csv('data/alpha_0_25.dat', skiprows=1, header=None, delim_whitespace=True)
-
 # variables
 c_e_a = pybamm.Variable("Concentration anode", domain="anode")
 c_e_c = pybamm.Variable("Concentration cathode", domain="cathode")
@@ -44,34 +41,44 @@ F_0 = params['j_app'] / params['F']
 j_0 = params['j_app']
 
 def diffusion_coeff(c):
-    return 5.253e-10 * pybamm.Exp( -7.1e-4 * c * 1000 ) * eps / ( D_0 * tau )
-
+    # return 5.253e-10 * pybamm.Exp( -7.1e-4 * c * 1000 ) * eps / ( D_0 * tau )
+    return 2.646e-10 / D_0
 def conduction_coeff(c):
-    return 1e-4 * c * c_0 * ( 5.2069096 - 0.002143628 * c * c_0 + \
-        2.34402e-7 * c**2 * c_0**2 )**2 * eps / ( k_0 * tau )
+    return 1
+D = diffusion_coeff(1)
+    # return 1e-4 * c * c_0 * ( 5.2069096 - 0.002143628 * c * c_0 + \
+    #     2.34402e-7 * c**2 * c_0**2 )**2 * eps / ( k_0 * tau )
 
 #  Derived variables
 
-j_e = -conduction_coeff(c_e) * (pybamm.grad(phi_e) - 2 * (1 - t_plus) * pybamm.grad(c_e) / c_e)
-F_e = -diffusion_coeff(c_e) * pybamm.grad(c_e) + t_plus * j_e
+j_e_a = -conduction_coeff(c_e_a) * (pybamm.grad(phi_e_a) - 2 * (1 - t_plus) * pybamm.grad(c_e_a) / c_e_a)
+j_e_c = -conduction_coeff(c_e_c) * (pybamm.grad(phi_e_c) - 2 * (1 - t_plus) * pybamm.grad(c_e_c) / c_e_c)
+j_e = pybamm.concatenation(j_e_a, j_e_c)
+F_e_a = -diffusion_coeff(c_e_a) * pybamm.grad(c_e_a) + t_plus * j_e_a
+F_e_c = -diffusion_coeff(c_e_c) * pybamm.grad(c_e_c) + t_plus * j_e_c
+F_e = pybamm.concatenation(F_e_a, F_e_c)
 
 # equations
 
-bv = 4 * np.pi * alpha**2 * k * c_e**(1/2) * ( multiplier * PHI - phi_e ) / 2
-
-dcdt = ( 1 / eps ) * ( -pybamm.div( F_e ) + bv )
-model.rhs[c_e] =  dcdt
+# bv = 4 * np.pi * alpha**2 * k * c_e**(1/2) * ( multiplier * PHI - phi_e ) / 2
+# bv = 1e-9
+dcdt_a = (1/eps) * (pybamm.div(diffusion_coeff(c_e_a)*pybamm.grad(c_e_a)) +  (1-t_plus))
+dcdt_c = (1/eps) * (pybamm.div(diffusion_coeff(c_e_c)*pybamm.grad(c_e_c)) - (1-t_plus))
+model.rhs[c_e_a] =  dcdt_a
+model.rhs[c_e_c] =  dcdt_c
 
 model.algebraic = {
-    phi_e: pybamm.div( j_e ) - bv
+    phi_e_a: pybamm.div( j_e_a ) - 1,
+    phi_e_c: pybamm.div( j_e_c ) + 1
 }
-
 
 
 # initial conditions
 model.initial_conditions = {
-    c_e: pybamm.Scalar(1),
-    phi_e: pybamm.Scalar(0),
+    c_e_a: pybamm.Scalar(1),
+    c_e_c: pybamm.Scalar(1),
+    phi_e_c: pybamm.Scalar(0),
+    phi_e_a: pybamm.Scalar(0),
     }
 
 bcs = {
@@ -82,6 +89,7 @@ bcs = {
     phi_e: {
             "left": (pybamm.Scalar(0), "Neumann"),
             "right": (pybamm.Scalar(0), "Neumann"),
+            "left": (pybamm.Scalar(0), "Dirichlet")
         },
 }
 
@@ -119,7 +127,7 @@ disc.process_model(model)
 
 # solve
 solver = pybamm.CasadiSolver()
-t = np.linspace(0, 3, t_points)
+t = np.linspace(0, params['t_final'], t_points)
 solution = solver.solve(model, t)
 
 c = solution["Concentration"]
@@ -132,17 +140,19 @@ def domain_mult(x):
     x = (x-0.5)*2
     return x
 
+def analytic (x, D):
+    return domain_mult(x) *(1-t_plus) * (x-1)**2 / (2*D)-(1-t_plus)*(x-1)/D+1
 
 # plot
 x = np.linspace(0, 2, 100)
-t = 3
+t = params['t_final']
 fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(8, 6))
 fig.patch.set_facecolor('white')
 ax[0,0].plot(x*100, c(t=t, x=x)*c_0, label="sim")
-ax[0,0].plot((andres_data[0]+1)*100, andres_data[1][::-1]*c_0, label="andres")
+ax[0,0].plot(x*100, analytic(x, D)*c_0, '--', lw=2, alpha=0.5, label="analytic", color='red')
 ax[0,0].set_xlabel("x [µm]")
 ax[0,0].set_ylabel("Concentration [mol.m-3]")
-plt.legend()
+ax[0,0].legend()
 
 ax[0,1].plot(x*100, phi(t=t, x=x)*phi_0, label='sim')
 ax[0,1].set_xlabel("x [µm]")

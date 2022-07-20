@@ -2,6 +2,7 @@ import pybamm
 import numpy as np
 import matplotlib.pyplot as plt
 import json
+import pandas as pd
 
 model = pybamm.BaseModel()
 
@@ -27,8 +28,7 @@ n_points = params['n_points']
 t_points = params['t_points']
 t_plus = params['t_plus']
 c_0 = params['c_0']
-# alpha = params['alpha']
-alpha = 0.25
+alpha = params['alpha']
 PHI = params['PHI']
 tau = params['tau']
 L = params['L']
@@ -42,7 +42,7 @@ phi_0 = params["R"] * params["T"] / params["F"]
 F_0 = params['j_app'] / params['F']
 j_0 = params['j_app']
 
-D = 1 * 2.646e-10 / D_0
+D = 2.646e-10 / D_0
 print(D)
 # equations
 dcdt = (1/eps) * (pybamm.div(D*pybamm.grad(c_e)) + multiplier * (1-t_plus))
@@ -104,12 +104,27 @@ def domain_mult(x):
 
 def analytic (x):
     return domain_mult(x) *(1-t_plus) * (x-1)**2 / (2*D)-(1-t_plus)*(x-1)/D+1
+
+# RESULTS FROM 3D
+data = pd.read_csv('data/galvanostatic-3d-data.txt', skiprows=9, names=['X', 'Y', 'Z', 'C'], delim_whitespace=True)
+
+n_samples = 50
+xs = []
+cs = []
+xs = np.linspace(0,2,n_samples+1)
+for i, xi in enumerate(xs):
+    if i < n_samples:
+        xi_next = xs[i+1]
+        cs.append(data.loc[(data['X']>=xi )& (data['X']<xi_next)].C.mean())
+
+xs = xs[:-1]
 # plot
 x = np.linspace(0, 2, 100)
 fig = plt.figure()
 fig.patch.set_facecolor('white')
-plt.plot(x*100, c(t=10, x=x)*c_0, label="sim")
-plt.plot(x*100, analytic(x)*c_0, '--', label="analytic")
+plt.plot(x*100, c(t=10, x=x)*c_0, label="1D sim")
+plt.plot(np.flip(xs*100), [a*c_0 for a in cs],label="3D sim")
+plt.plot(x*100, analytic(x)*c_0, '--', lw=2, alpha=0.5, label="analytic", color='red')
 plt.xlabel("x [µm]")
 plt.ylabel("Concentration [mol.m-3]")
 plt.legend()
